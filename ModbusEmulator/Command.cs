@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -9,97 +10,146 @@ namespace ModbusEmulator;
 public sealed class Command
 {
     public bool IsGroup { get; init; }
-    public string Id { get; init; } = string.Empty;
-    public string Func { get; init; } = string.Empty;
-    public string StartAddress { get; init; } = string.Empty;
+    public required string Id { get; init; }
+    public required FuncType Func { get; init; } 
+    public required string StartAddress { get; init; }
 
-    public int RegisterQuantity { get; init; }
+    public required int RegisterQuantity { get; init; }
 
     public int? DataBytesQuantity { get; init; }
 
     public int? CounterValue { get; init; }
 
-    public Dictionary<int, RelayData> RelaysData { get; init; } = new();
+    public required RelayData[] RelaysData { get; init; }
+
+    public required string[] DevicesId { get; init; }
+
+    public int? TimeSlot { get; init; }
 
     /// <summary>
     /// Парсит команду из строки в старом формате Modbus.
     /// </summary>
-    /// <param name="data">Строка команды</param>
+    /// <param name="rawData">Строка команды</param>
     /// <returns>Объект команды или null при ошибке парсинга</returns>
-    public static Command? Parse(string data)
+    public static Command? Parse(string rawData, int? counterValue = null)
     {
         try
         {
-            if (string.IsNullOrEmpty(data) || !data.StartsWith(':'))
+            if (string.IsNullOrEmpty(rawData) || !rawData.StartsWith(':'))
                 return null;
-            data = data.Replace(":", "").Replace("\r\n", "");
-            if (data.Length < 14)
+            rawData = rawData.Replace(":", "").Replace("\r\n", "");
+            if (rawData.Length < 14)
                 return null;
-            var lrc = data[^2..];
-            data = data.Substring(0, data.Length - 2);
-            if (String.Compare(lrc, LRCCalculator.Calculate(data)) != 0)
+            var lrc = rawData[^2..];
+            rawData = rawData.Substring(0, rawData.Length - 2);
+            if (String.Compare(lrc, LRCCalculator.Calculate(rawData)) != 0)
                 return null;
-            var id = data.Substring(0, 2);
-            var func = data.Substring(2, 2);
-            var startAddress = data.Substring(4, 4);
-            var registerQuantity = int.Parse(data.Substring(8, 4), System.Globalization.NumberStyles.HexNumber);
-            if (data.Length > 12)
+            var id = rawData.Substring(0, 2);   
+            var func = rawData.Substring(2, 2);
+            var startAddress = rawData.Substring(4, 4);
+            var registerQuantity = int.Parse(rawData.Substring(8, 4), System.Globalization.NumberStyles.HexNumber);
+            if (rawData.Length > 12)
             {
-                Dictionary<int, RelayData> relaysData = new();
-                var dataBytesQuantity = int.Parse(data.Substring(12, 2), System.Globalization.NumberStyles.HexNumber);
-                var counter = int.Parse(data.Substring(14, 4), System.Globalization.NumberStyles.HexNumber);
-                for (int cnt = 0, index = 18; cnt < 3; cnt++)
+                List<RelayData> relaysData = new();
+                var dataBytesQuantity = int.Parse(rawData.Substring(12, 2), System.Globalization.NumberStyles.HexNumber);
+                var commandData = rawData.Substring(14, rawData.Length - 14);
+                if (commandData.Length / 2 != dataBytesQuantity)
+                    return null;
+                if (dataBytesQuantity >= 14)
                 {
-                    if (data.Substring(index, 8).Any(ch => ch != 'F'))
+                    int index = 0;
+                    var counter = int.Parse(commandData.Substring(index, 4), System.Globalization.NumberStyles.HexNumber);
+                    index += 4;
+                    for (int cnt = 0; cnt < 3; cnt++)
                     {
-                        var relayStatus = (RelayStatus)int.Parse(data.Substring(index, 2));
-                        index += 2;
-                        var delay = int.Parse(data.Substring(index, 4)) * 0.1;
-                        index += 4;
-                        var duration = int.Parse(data.Substring(index, 2));
-                        index += 2;
-                        RelayData relayData = new()
+                        if (commandData.Substring(index, 8).Any(ch => ch != 'F'))
                         {
-                            RelayStatus = relayStatus,
-                            Delay = delay,
-                            Duration = duration
-                        };
-                        relaysData.Add(cnt, relayData);
+                            var relayStatus = (RelayStatus)int.Parse(commandData.Substring(index, 2), System.Globalization.NumberStyles.HexNumber);
+                            index += 2;
+                            var delay = int.Parse(commandData.Substring(index, 2), System.Globalization.NumberStyles.HexNumber);
+                            index += 2;
+                            var duration = int.Parse(commandData.Substring(index, 4), System.Globalization.NumberStyles.HexNumber);
+                            index += 4;
+                            RelayData relayData = new()
+                            {
+                                RelayStatus = relayStatus,
+                                Delay = delay,
+                                Duration = duration
+                            };
+                            relaysData.Add(relayData);
+                        }
+                        else
+                        {
+                            index += 8;
+                            relaysData.Add(new());
+                        } 
+                            
                     }
-                    else index += 8;
-
+                    if (dataBytesQuantity == 24)
+                    {
+                        List<string> devicesId = new();
+                        for (int cnt = 0; cnt < 8; cnt++, index += 2)
+                        {
+                            var device = commandData.Substring(index, 2);
+                            if (device.Any(c => c != '0'))
+                            {
+                                devicesId.Add(device);
+                            }
+                        }
+                        index += 2;
+                        int timeSlot = int.Parse(commandData.Substring(index, 2), System.Globalization.NumberStyles.HexNumber) * 10;
+                        return new Command()
+                        {
+                            StartAddress = startAddress,
+                            CounterValue = counter,
+                            DataBytesQuantity = dataBytesQuantity,
+                            Func = GetCommandFromString(func),
+                            Id = id,
+                            IsGroup = id == "FF",
+                            RegisterQuantity = registerQuantity,
+                            RelaysData = relaysData.ToArray(),
+                            DevicesId = devicesId.ToArray(),
+                            TimeSlot = timeSlot
+                        };
+                    }
+                    return new Command()
+                    {
+                        StartAddress = startAddress,
+                        CounterValue = counter,
+                        DataBytesQuantity = dataBytesQuantity,
+                        Func = GetCommandFromString(func),
+                        Id = id,
+                        IsGroup = id == "FF",
+                        RegisterQuantity = registerQuantity,
+                        RelaysData = relaysData.ToArray(),
+                        DevicesId = []
+                    };
                 }
-                return new Command()
-                {
-                    StartAddress = startAddress,
-                    CounterValue = counter,
-                    DataBytesQuantity = dataBytesQuantity,
-                    Func = func,
-                    Id = id,
-                    IsGroup = id == "FF",
-                    RegisterQuantity = registerQuantity,
-                    RelaysData = relaysData
-                };
             }
             else
             {
                 return new Command
                 {
                     Id = id,
-                    Func = func,
+                    Func = GetCommandFromString(func),
                     StartAddress = startAddress,
-                    RegisterQuantity = registerQuantity
+                    RegisterQuantity = registerQuantity,
+                    CounterValue = counterValue ?? 0,
+                    RelaysData = [],
+                    DevicesId = []
                 };
-            }
-
-
-
-
-                
+            }   
         }
         catch (Exception)
         {
-            return null;
+            
         }
+        return null;
+    }
+
+    private static FuncType GetCommandFromString(string func)
+    {
+        return func == "04" ? FuncType.Read : func == "10" ? FuncType.Write :
+                            throw new NotSupportedException();
     }
 }

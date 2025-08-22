@@ -8,9 +8,9 @@ namespace ModbusEmulator;
 
 public sealed class RelayData
 {
-    public RelayStatus RelayStatus { get; init; } 
+    public RelayStatus RelayStatus { get; init; } = RelayStatus.OFF;
 
-    public double Delay { get; init; }
+    public double? Delay { get; init; } = null;
 
-    public int Duration { get; init; }
+    public double? Duration { get; init; } = null;
 }
