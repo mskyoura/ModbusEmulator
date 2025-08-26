@@ -164,7 +164,7 @@ namespace ModbusEmulator
                             _logger.LogError(ex, "Unexpected error reading from serial port, continuing...");
                         }
                     }
-                    await Task.Delay(100, cancellationToken);
+                    await Task.Delay(1000, cancellationToken);
                 }
             }
             catch (OperationCanceledException)

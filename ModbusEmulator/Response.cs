@@ -34,7 +34,7 @@ public sealed class Response
         // Формат: :<ID>10<startAddr><regCount><LRC>\r\n
         string payload = $"{Id}100000000C";
         string lrc = LRCCalculator.Calculate(payload);
-        return $":{payload}{lrc}\n\r";
+        return $":{payload}{lrc}\r\n";
     }
 
     private string FormatReadResponse()
@@ -54,7 +54,7 @@ public sealed class Response
         string byteCount = (data.Length / 2).ToString("X2");
         string payload = $"{Id}04{byteCount}{data}";
         string lrc = LRCCalculator.Calculate(payload);
-        return $":{payload}{lrc}\n\r";
+        return $":{payload}{lrc}\r\n";
     }
 
     private string RelayStatusToHex()

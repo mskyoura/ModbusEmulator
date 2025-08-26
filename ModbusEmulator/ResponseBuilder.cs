@@ -15,14 +15,11 @@ namespace ModbusEmulator
 
         public Response[] BuildResponse(Command command)
         {
-            var validDevicesId = command.DevicesId.Intersect(_devicesId);
-            validDevicesId = validDevicesId.Any() && command.IsGroup ? validDevicesId : [command.Id];
-            return command.Func switch { 
+            return command.Func switch 
+            { 
                 FuncType.Read => [BuildReadResponse(command)],
-                FuncType.Write => command.IsGroup && command.DevicesId.Any() ? 
-                    command.DevicesId.Order().Select((id, cnt) => BuildWriteResponse(command, cnt, id)).ToArray() :
-                    validDevicesId.Select((id, _) => BuildWriteResponse(command, 0, id)).ToArray(),
-                    _ => []
+                FuncType.Write => BuildWriteResponses(command),
+                _ => []
             };
         }
 
@@ -36,6 +33,19 @@ namespace ModbusEmulator
                 CmdNumber = command.CounterValue ?? 0,
                 RelaysStatus = _relayStatusStateMachine.Get()
             };
+        }
+
+        private Response[] BuildWriteResponses(Command command)
+        {
+            // For group write commands (with specified DeviceIds), send a confirmation Response for each device
+            if (command.IsGroup && command.DevicesId.Any())
+            {
+                var validDeviceIds = command.DevicesId.Intersect(_devicesId).Order().ToArray();
+                return validDeviceIds.Select((id, cnt) => BuildWriteResponse(command, cnt, id)).ToArray();
+            }
+            
+            // For individual write commands, send a confirmation Response for that device
+            return [BuildWriteResponse(command, 0, command.Id)];
         }
 
         private Response BuildWriteResponse(Command command, int cnt, string deviceId)
